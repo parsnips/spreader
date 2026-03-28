@@ -17,6 +17,8 @@ const (
 	maxTokenWeight           = 255
 )
 
+var newRotatingTokenBucketLimiter = rate.NewRotatingTokenBucketLimiter
+
 type SpreadScheduler interface {
 	Schedule(time.Time, []byte) (time.Duration, error)
 	SetPublisherCount(int)
@@ -49,8 +51,11 @@ func NewSpreadScheduler(
 	if targetRateLimitSeconds <= 0 {
 		return nil, errors.New("targetRateLimitSeconds must be positive")
 	}
+	if horizonSeconds <= 0 {
+		return nil, errors.New("horizonSeconds must be positive")
+	}
 
-	limiter, err := rate.NewRotatingTokenBucketLimiter(
+	limiter, err := newRotatingTokenBucketLimiter(
 		options.numBuckets,
 		maxTokenWeight,
 		refillRateForPublisherCount(targetRateLimitSeconds, defaultPublisherCount),
@@ -86,10 +91,13 @@ func refillRateForPublisherCount(targetRate, count int) float64 {
 
 // Schedule returns a duration to schedule item up to the time horizon or errors.
 func (r *spreadScheduler) Schedule(now time.Time, id []byte) (time.Duration, error) {
+	checkID := make([]byte, len(id)+8)
+	copy(checkID, id)
+
 	for i := range r.horizonSeconds {
 		atTime := now.Truncate(time.Second).Add(time.Duration(i) * time.Second).UnixNano()
-		checkId := binary.BigEndian.AppendUint64(id, uint64(atTime))
-		if r.limiter.TakeTokens(checkId, maxTokenWeight) {
+		binary.BigEndian.PutUint64(checkID[len(id):], uint64(atTime))
+		if r.limiter.TakeTokens(checkID, maxTokenWeight) {
 			return time.Duration(i) * time.Second, nil
 		}
 	}

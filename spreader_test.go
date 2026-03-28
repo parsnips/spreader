@@ -1,10 +1,13 @@
 package spreader
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"testing"
 	"time"
+
+	"github.com/webriots/rate"
 )
 
 func TestNewSpreadScheduler(t *testing.T) {
@@ -124,6 +127,33 @@ func TestNewSpreadSchedulerInvalidRate(t *testing.T) {
 	}
 }
 
+func TestNewSpreadSchedulerInvalidHorizon(t *testing.T) {
+	_, err := NewSpreadScheduler(10, 0)
+	if err == nil {
+		t.Fatal("expected error for zero horizon")
+	}
+}
+
+func TestNewSpreadSchedulerPropagatesLimiterError(t *testing.T) {
+	orig := newRotatingTokenBucketLimiter
+	newRotatingTokenBucketLimiter = func(
+		numBuckets uint,
+		burstCapacity uint8,
+		refillRate float64,
+		refillRateUnit time.Duration,
+	) (*rate.RotatingTokenBucketLimiter, error) {
+		return nil, errors.New("boom")
+	}
+	defer func() {
+		newRotatingTokenBucketLimiter = orig
+	}()
+
+	_, err := NewSpreadScheduler(10, 60)
+	if err == nil || err.Error() != "boom" {
+		t.Fatalf("expected limiter error to propagate, got %v", err)
+	}
+}
+
 func TestSetPublisherCount(t *testing.T) {
 	scheduler, err := NewSpreadScheduler(10, 60)
 	if err != nil {
@@ -138,6 +168,27 @@ func TestSetPublisherCount(t *testing.T) {
 	s.SetPublisherCount(3)
 	if got := s.limiter.RefillRate(); math.Abs(got-(10.0*255.0/3.0)) > 1e-9 {
 		t.Fatalf("expected refill rate of %v, got %v", 10.0*255.0/3.0, got)
+	}
+}
+
+func TestSetPublisherCountNonPositiveUsesDefault(t *testing.T) {
+	scheduler, err := NewSpreadScheduler(10, 60)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s := scheduler.(*spreadScheduler)
+	s.SetPublisherCount(3)
+	s.SetPublisherCount(0)
+
+	if got := s.limiter.RefillRate(); got != 2550 {
+		t.Fatalf("expected refill rate to reset to default, got %v", got)
+	}
+}
+
+func TestRefillRateForPublisherCountDefaultsNonPositiveCount(t *testing.T) {
+	if got := refillRateForPublisherCount(10, 0); got != 2550 {
+		t.Fatalf("expected default refill rate for non-positive count, got %v", got)
 	}
 }
 
@@ -174,6 +225,21 @@ func TestSetPublisherCountPreservesConsumedState(t *testing.T) {
 	}
 }
 
+func TestSetPublisherCountNoOpWhenUnchanged(t *testing.T) {
+	scheduler, err := NewSpreadScheduler(10, 60)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s := scheduler.(*spreadScheduler)
+	before := s.limiter.RefillRate()
+	s.SetPublisherCount(1)
+
+	if got := s.limiter.RefillRate(); got != before {
+		t.Fatalf("expected unchanged refill rate, got %v want %v", got, before)
+	}
+}
+
 func TestScheduleConcurrent(t *testing.T) {
 	s, err := NewSpreadScheduler(100, 120)
 	if err != nil {
@@ -194,5 +260,25 @@ func TestScheduleConcurrent(t *testing.T) {
 		if err := <-errs; err != nil {
 			t.Fatalf("unexpected error in concurrent schedule: %v", err)
 		}
+	}
+}
+
+func TestScheduleDoesNotMutateCallerIDBuffer(t *testing.T) {
+	s, err := NewSpreadScheduler(10, 60)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	backing := make([]byte, 12)
+	copy(backing, []byte("item"))
+	id := backing[:4]
+	want := append([]byte(nil), backing...)
+
+	if _, err := s.Schedule(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), id); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if string(backing) != string(want) {
+		t.Fatalf("expected Schedule to leave caller buffer unchanged, got %v want %v", backing, want)
 	}
 }
