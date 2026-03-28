@@ -16,6 +16,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Single-file library (`spreader.go`) exposing the `SpreadScheduler` interface with two methods:
 - `Schedule(time.Time, []byte) (time.Duration, error)` — finds the next available second-granularity slot within the horizon
-- `SetPublisherCount(uint8)` — adjusts token consumption for distributed environments where multiple publishers share the rate limit
+- `SetPublisherCount(int)` — adjusts the per-publisher share for distributed environments, including publisher counts above 255
 
 The scheduler hashes `id + timestamp` into a rotating token bucket to get deterministic, collision-resistant slot assignment. The `publisherCount` multiplier ensures the per-publisher rate stays within bounds when scaling horizontally.

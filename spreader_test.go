@@ -2,6 +2,7 @@ package spreader
 
 import (
 	"fmt"
+	"math"
 	"testing"
 	"time"
 )
@@ -124,17 +125,52 @@ func TestNewSpreadSchedulerInvalidRate(t *testing.T) {
 }
 
 func TestSetPublisherCount(t *testing.T) {
+	scheduler, err := NewSpreadScheduler(10, 60)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s := scheduler.(*spreadScheduler)
+	if got := s.limiter.RefillRate(); got != 2550 {
+		t.Fatalf("expected initial refill rate of 2550, got %v", got)
+	}
+
+	s.SetPublisherCount(3)
+	if got := s.limiter.RefillRate(); math.Abs(got-(10.0*255.0/3.0)) > 1e-9 {
+		t.Fatalf("expected refill rate of %v, got %v", 10.0*255.0/3.0, got)
+	}
+}
+
+func TestSetPublisherCountLarge(t *testing.T) {
+	scheduler, err := NewSpreadScheduler(850, 900)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s := scheduler.(*spreadScheduler)
+	s.SetPublisherCount(1245)
+
+	if got := s.limiter.RefillRate(); math.Abs(got-(850.0*255.0/1245.0)) > 1e-9 {
+		t.Fatalf("expected refill rate of %v, got %v", 850.0*255.0/1245.0, got)
+	}
+}
+
+func TestSetPublisherCountPreservesConsumedState(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	// With burstCapacity=1 and publisherCount=3, TakeTokens always fails
-	// because a bucket can never hold 3 tokens. So all Schedule calls
-	// should exceed the horizon.
-	s, _ := NewSpreadScheduler(10, 60)
-	s.SetPublisherCount(3)
+	s, err := NewSpreadScheduler(1, 1, WithNumBuckets(1))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	_, err := s.Schedule(now, []byte("item-0"))
-	if err != ErrTimeHorizonExceeded {
-		t.Fatalf("expected ErrTimeHorizonExceeded with publisherCount=3, got %v", err)
+	if _, err := s.Schedule(now, []byte("item-0")); err != nil {
+		t.Fatalf("expected initial schedule to succeed, got %v", err)
+	}
+
+	s.SetPublisherCount(2)
+
+	if _, err := s.Schedule(now, []byte("item-1")); err != ErrTimeHorizonExceeded {
+		t.Fatalf("expected consumed state to survive publisher count change, got %v", err)
 	}
 }
 

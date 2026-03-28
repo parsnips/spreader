@@ -42,7 +42,7 @@ s, err := spreader.NewSpreadScheduler(10, 60, spreader.WithNumBuckets(1<<16))
 
 ### Distributed environments
 
-When multiple publishers share the same rate limit, set the publisher count so each instance stays within bounds:
+When multiple publishers share the same rate limit, set the publisher count so each instance stays within bounds. Large publisher counts are supported:
 
 ```go
 s.SetPublisherCount(3) // 3 publishers splitting the rate limit
