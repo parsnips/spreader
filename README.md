@@ -1,5 +1,9 @@
 # spreader
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/parsnips/spreader.svg)](https://pkg.go.dev/github.com/parsnips/spreader)
+[![Go Report Card](https://goreportcard.com/badge/github.com/parsnips/spreader)](https://goreportcard.com/report/github.com/parsnips/spreader)
+[![Coverage Status](https://coveralls.io/repos/github/parsnips/spreader/badge.svg?branch=main)](https://coveralls.io/github/parsnips/spreader?branch=main)
+
 A Go library for rate-limited scheduling that spreads work evenly across a time horizon.
 
 Given an item ID and the current time, `SpreadScheduler` finds the earliest second within a configurable time horizon where the item can be scheduled without exceeding a target rate limit. Scheduling is deterministic — the same ID at the same time always produces the same result, making it safe for use in distributed systems.
