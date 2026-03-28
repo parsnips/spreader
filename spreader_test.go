@@ -97,14 +97,14 @@ func TestScheduleExceedsHorizon(t *testing.T) {
 
 func TestScheduleSpreadsAcrossHorizon(t *testing.T) {
 	// Few buckets forces collisions, spreading items across seconds.
-	s, err := NewSpreadScheduler(1, 300, WithNumBuckets(64))
+	s, err := NewSpreadScheduler(1, 300, WithNumBuckets(256))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	seen := make(map[time.Duration]int)
-	for i := range 20 {
+	for i := range 100 {
 		d, err := s.Schedule(now, []byte(fmt.Sprintf("item-%d", i)))
 		if err != nil {
 			t.Fatalf("unexpected error on item %d: %v", i, err)
@@ -116,27 +116,25 @@ func TestScheduleSpreadsAcrossHorizon(t *testing.T) {
 	}
 }
 
+func TestNewSpreadSchedulerInvalidRate(t *testing.T) {
+	_, err := NewSpreadScheduler(0, 60)
+	if err == nil {
+		t.Fatal("expected error for zero rate")
+	}
+}
+
 func TestSetPublisherCount(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	// Few buckets so tokens exhaust quickly, making publisher count
-	// differences observable.
-	s1, _ := NewSpreadScheduler(1, 30, WithNumBuckets(4))
-	s2, _ := NewSpreadScheduler(1, 30, WithNumBuckets(4))
-	s2.SetPublisherCount(3)
+	// With burstCapacity=1 and publisherCount=3, TakeTokens always fails
+	// because a bucket can never hold 3 tokens. So all Schedule calls
+	// should exceed the horizon.
+	s, _ := NewSpreadScheduler(10, 60)
+	s.SetPublisherCount(3)
 
-	var diffs int
-	for i := range 50 {
-		id := []byte(fmt.Sprintf("item-%d", i))
-		d1, _ := s1.Schedule(now, id)
-		d2, _ := s2.Schedule(now, id)
-		if d1 != d2 {
-			diffs++
-		}
-	}
-
-	if diffs == 0 {
-		t.Fatal("expected different scheduling with different publisher counts")
+	_, err := s.Schedule(now, []byte("item-0"))
+	if err != ErrTimeHorizonExceeded {
+		t.Fatalf("expected ErrTimeHorizonExceeded with publisherCount=3, got %v", err)
 	}
 }
 
